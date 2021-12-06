@@ -77,10 +77,35 @@ sys_sleep(void)
 
 
 #ifdef LAB_PGTBL
+#define PAGENUM 64
 int
 sys_pgaccess(void)
 {
   // lab pgtbl: your code here.
+  uint64 base, mask;
+  int len;
+  if(argaddr(0, &base) < 0 || argint(1, &len) < 0 
+      || argaddr(2, &mask) < 0)
+    return -1;
+
+  if(len > PAGENUM) {
+    printf("too many page\n");
+    return -1;
+  }
+
+  struct proc *p = myproc();
+  uint64 result = 0;
+  uint64 va = PGROUNDDOWN(base);
+  for(int i = 0; i < len; ++ i, va += PGSIZE) {
+    pte_t *pte = walk(p->pagetable, va, 0);
+    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)
+      return -1;
+    if(*pte & PTE_A) {
+      result |= 1 << i;
+      *pte &= ~PTE_A; // clear
+    }
+  }
+  copyout(p->pagetable, mask, (char *)&result, (len + 7) / 8);
   return 0;
 }
 #endif

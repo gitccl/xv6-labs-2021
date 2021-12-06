@@ -1,0 +1,6 @@
+page0: code and data
+page1: an inaccessible page just below the stack page(without PTE_U)
+page2: stack page
+page3: USYSCALL mapped page
+page4: trapframe mapped page
+page6: trampoline mapped page
