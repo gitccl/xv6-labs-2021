@@ -243,6 +243,7 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+  p->tracemask = 0;
 
   release(&p->lock);
 }
@@ -304,6 +305,8 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
+
+  np->tracemask = p->tracemask;
 
   release(&np->lock);
 
@@ -653,4 +656,15 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+uint64 countproc() {
+  uint64 total = 0;
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state != UNUSED) {
+      ++ total;
+    }
+  }
+  return total;
 }
