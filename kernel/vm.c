@@ -301,24 +301,29 @@ int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
-  uint64 pa, i;
+  uint64 pa, i, newpte;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
-    pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+
+    newpte = *pte;
+    newpte &= ~PTE_W;
+    newpte |= PTE_COW;
+    pa = PTE2PA(newpte);
+    flags = PTE_FLAGS(newpte);
+
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    *pte = newpte;
+    increfs(pa);
+    // printf("parent: %p -> %p\n", i, *walk(old, i, 0));
+    // printf("child : %p -> %p\n", i, *walk(new, i, 0));
+    // printf("pa@%p refs: %d\n", pa, getrefs(pa));
   }
   return 0;
 
@@ -350,9 +355,10 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
+    if(handlecow(pagetable, va0) < 0) 
       return -1;
+    pa0 = walkaddr(pagetable, va0);
+
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;
@@ -431,4 +437,40 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int handlecow(pagetable_t pagetable, uint64 va) {
+  pte_t *pte = walk(pagetable, va, 0);
+  if((*pte & PTE_V) == 0) {
+    printf("page fault @ %p, without PTE_V\n", va);
+    return -1;
+  }
+  if((*pte & PTE_U) == 0){
+    printf("page fault @ %p, without PTE_U\n", va);
+    return -1;
+  }
+  if((*pte & PTE_COW) == 0) 
+    return 0;
+  
+  // printf("page fault @%p\n", va);
+
+  uint64 prevpa = PTE2PA(*pte);
+  if(getrefs(prevpa) == 1) {
+    // only one refs, just update pte flags
+    *pte ^= PTE_COW;
+    *pte |= PTE_W;
+    return 0;
+  }
+
+  void *pa = kalloc();
+  if(pa == 0)
+    return -1;
+
+  memmove(pa, (void *)prevpa, PGSIZE);
+  decrefs(prevpa);
+  uint64 newpte = PTE_FLAGS(*pte) | PTE_W | PA2PTE(pa);
+  newpte ^= PTE_COW;
+  *pte = newpte;
+
+  return 0;
 }
