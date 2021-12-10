@@ -63,9 +63,8 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
-int             increfs(uint64 pa);
-int             decrefs(uint64 pa);
-int             getrefs(uint64 pa);
+void            increfs(uint64 pa);
+int             handlecow(pagetable_t pagetable, uint64 va);
 
 
 // log.c
@@ -175,7 +174,6 @@ int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 pte_t *         walk(pagetable_t pagetable, uint64 va, int alloc);
-int             handlecow(pagetable_t pagetable, uint64 va);
 
 // plic.c
 void            plicinit(void);

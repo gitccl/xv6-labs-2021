@@ -321,9 +321,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     }
     *pte = newpte;
     increfs(pa);
-    // printf("parent: %p -> %p\n", i, *walk(old, i, 0));
-    // printf("child : %p -> %p\n", i, *walk(new, i, 0));
-    // printf("pa@%p refs: %d\n", pa, getrefs(pa));
   }
   return 0;
 
@@ -437,40 +434,4 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
-}
-
-int handlecow(pagetable_t pagetable, uint64 va) {
-  pte_t *pte = walk(pagetable, va, 0);
-  if((*pte & PTE_V) == 0) {
-    printf("page fault @ %p, without PTE_V\n", va);
-    return -1;
-  }
-  if((*pte & PTE_U) == 0){
-    printf("page fault @ %p, without PTE_U\n", va);
-    return -1;
-  }
-  if((*pte & PTE_COW) == 0) 
-    return 0;
-  
-  // printf("page fault @%p\n", va);
-
-  uint64 prevpa = PTE2PA(*pte);
-  if(getrefs(prevpa) == 1) {
-    // only one refs, just update pte flags
-    *pte ^= PTE_COW;
-    *pte |= PTE_W;
-    return 0;
-  }
-
-  void *pa = kalloc();
-  if(pa == 0)
-    return -1;
-
-  memmove(pa, (void *)prevpa, PGSIZE);
-  decrefs(prevpa);
-  uint64 newpte = PTE_FLAGS(*pte) | PTE_W | PA2PTE(pa);
-  newpte ^= PTE_COW;
-  *pte = newpte;
-
-  return 0;
 }

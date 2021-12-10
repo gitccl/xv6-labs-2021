@@ -29,28 +29,11 @@ struct {
 static int pagerefs[(PHYSTOP - KERNBASE) >> PGSHIFT];
 static struct spinlock reflock;
 
-int increfs(uint64 pa) {
-  int r;
+// must not held locks when call increfs
+void increfs(uint64 pa) {
   acquire(&reflock);
-  r = ++ pagerefs[PA2IDX(pa)];
+  ++ pagerefs[PA2IDX(pa)];
   release(&reflock);
-  return r;
-}
-
-int decrefs(uint64 pa) {
-  int r;
-  acquire(&reflock);
-  r = -- pagerefs[PA2IDX(pa)];
-  release(&reflock);
-  return r;
-}
-
-int getrefs(uint64 pa) {
-  int r;
-  acquire(&reflock);
-  r = pagerefs[PA2IDX(pa)];
-  release(&reflock);
-  return r;
 }
 
 void
@@ -67,7 +50,7 @@ freerange(void *pa_start, void *pa_end)
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE) {
-    increfs((uint64)p);
+    pagerefs[PA2IDX(p)] = 1;
     kfree(p);
   }
 }
@@ -84,7 +67,10 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  if (decrefs((uint64)pa) != 0) {
+  acquire(&reflock);
+  int refs = -- pagerefs[PA2IDX(pa)];
+  release(&reflock);
+  if (refs) {
     return ;
   }
 
@@ -111,11 +97,60 @@ kalloc(void)
   r = kmem.freelist;
   if(r) {
     kmem.freelist = r->next;
-    pagerefs[PA2IDX(r)] = 1;
+    pagerefs[PA2IDX(r)] = 1; // doesn't need lock
   }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+int handlecow(pagetable_t pagetable, uint64 va) {
+  if(va >= MAXVA)
+    return -1;
+  pte_t *pte = walk(pagetable, va, 0);
+  if(pte == 0) {
+    return -1;
+  }
+  if((*pte & PTE_V) == 0) {
+    printf("page fault @ %p, without PTE_V\n", va);
+    return -1;
+  }
+  if((*pte & PTE_U) == 0){
+    printf("page fault @ %p, without PTE_U\n", va);
+    return -1;
+  }
+  if((*pte & PTE_COW) == 0) 
+    return 0;
+  
+  // printf("page fault @%p\n", va);
+  // next part can concurrently run with kfree, thus pagerefs[] == 2
+  // so should reflock to protect.
+  uint64 prevpa = PTE2PA(*pte);
+  acquire(&reflock);
+  if(pagerefs[PA2IDX(prevpa)] == 1) {
+    // only one refs, just update pte flags
+    *pte ^= PTE_COW;
+    *pte |= PTE_W;
+    release(&reflock);
+    return 0;
+  }
+  
+  // printf("page fault @ %p of thread: %d\n", r_stval(), myproc()->pid);
+
+  void *pa = kalloc();
+  if(pa == 0) {
+    release(&reflock);
+    return -1;
+  }
+
+  memmove(pa, (void *)prevpa, PGSIZE);
+  -- pagerefs[PA2IDX(prevpa)];
+  release(&reflock);
+  
+  uint64 newpte = PTE_FLAGS(*pte) | PTE_W | PA2PTE(pa);
+  newpte ^= PTE_COW;
+  *pte = newpte;
+  return 0;
 }
