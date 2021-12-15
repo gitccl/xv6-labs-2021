@@ -144,6 +144,8 @@ e1000_recv(void)
     net_rx(rx_mbufs[rxindex]);
 
     rx_mbufs[rxindex] = mbufalloc(0);
+    if(rx_mbufs[rxindex] == 0) 
+      panic("mbufalloc failed");
     rx->addr = (uint64)rx_mbufs[rxindex]->head;
     rx->status = 0;
     regs[E1000_RDT] = rxindex;
