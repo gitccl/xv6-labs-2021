@@ -9,5 +9,13 @@
 #define MAXOPBLOCKS  10  // max # of blocks any FS op writes
 #define LOGSIZE      (MAXOPBLOCKS*3)  // max data blocks in on-disk log
 #define NBUF         (MAXOPBLOCKS*3)  // size of disk block cache
+
+#ifdef LAB_LOCK
+// must change size, otherwise block isn't enough and cannot pass usertests:writebig() 
+// because bcachetest write many blocks and not free
+#define FSSIZE       2000  
+#elif
 #define FSSIZE       1000  // size of file system in blocks
+#endif
+
 #define MAXPATH      128   // maximum file path name
