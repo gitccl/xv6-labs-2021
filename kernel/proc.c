@@ -135,6 +135,8 @@ found:
     return 0;
   }
 
+  p->mmap = 0;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -289,6 +291,8 @@ fork(void)
   }
   np->sz = p->sz;
 
+  vmareacopy(p, np);
+  
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -357,6 +361,8 @@ exit(int status)
   iput(p->cwd);
   end_op();
   p->cwd = 0;
+
+  unmapall();
 
   acquire(&wait_lock);
 

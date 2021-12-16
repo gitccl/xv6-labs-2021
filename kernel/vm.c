@@ -5,6 +5,11 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
+#include "sleeplock.h"
+#include "file.h"
+#include "fcntl.h"
 
 /*
  * the kernel's page table.
@@ -54,6 +59,7 @@ void
 kvminit(void)
 {
   kernel_pagetable = kvmmake();
+  mmapinit();
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -431,4 +437,45 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+int handlepgfault(uint64 va) {
+  struct proc *p = myproc();
+  struct vm_area_struct *vmarea;
+
+  for(vmarea = p->mmap; vmarea; vmarea = vmarea->vm_next) {
+    if(va >= PGROUNDDOWN(vmarea->vm_start) && va < PGROUNDUP(vmarea->vm_end)) {
+      break;
+    }
+  }
+  if(vmarea == 0)
+    return -1;
+
+  void *pa;
+  if((pa = kalloc()) == 0)
+    return -1;
+
+  memset(pa, 0, PGSIZE);
+
+  uint64 offset = va - vmarea->vm_start + vmarea->vm_off;
+  ilock(vmarea->vm_file->ip);
+  int rn = readi(vmarea->vm_file->ip, 0, (uint64)pa, offset, PGSIZE);
+  iunlock(vmarea->vm_file->ip);
+  if(rn == 0) {
+    printf("read out of file range\n");
+    return -1;
+  }
+
+  pte_t *pte = walk(p->pagetable, va, 0);
+  if((*pte & PTE_V) == 0) {
+    printf("mmap page no PTE_V\n");
+    return -1;
+  }
+  int prot = vmarea->vm_prot;
+  int flags = PTE_U | PTE_V;
+  if(prot & PROT_READ) flags |= PTE_R;
+  if(prot & PROT_WRITE) flags |= PTE_W;
+  if(prot & PROT_EXEC) flags |= PTE_X;
+  *pte = PA2PTE(pa) | flags;
+  return 0;
 }
